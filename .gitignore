@@ -1,0 +1,13 @@
+.ipynb_checkpoints/
+*.pyc
+*.png
+*.tif
+*.jpg
+*.pth
+*.mat
+*.npy
+*.state
+*.zip
+.eggs
+.DS_Store
+
