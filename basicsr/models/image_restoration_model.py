@@ -22,9 +22,10 @@ from functools import partial
 import math
 
 class RandomDrop(object):
-    def __init__(self, size=30, count=1, fill=(255,255,255),ratio=(0.2,0.8)):
+    def __init__(self, size=30, count=1, fill=(255,255,255),ratio=(0.2,0.8),random_count=None):
         self.size = size
         self.count = count
+        self.random_count = random_count
         self.fill = fill
         self.ratio = ratio
     def __call__(self, pic):
@@ -36,8 +37,9 @@ class RandomDrop(object):
         """
         height = pic.shape[2]
         width = pic.shape[3]
+        count = self.count if self.random_count == None else math.ceil(self.random_count * random.random())
         for i in range(pic.shape[0]):
-            for _ in range(self.count):
+            for _ in range(count):
                 randomY = math.floor(height * self.ratio[0]) +  np.random.randint(0, int(height * (self.ratio[1] - self.ratio[0]))) 
                 randomX = math.floor(width * self.ratio[0]) +  np.random.randint(0, int(width * (self.ratio[1] - self.ratio[0]))) 
                 for channel in range(3):
@@ -45,7 +47,7 @@ class RandomDrop(object):
 
         return pic
 
-drop_fn = RandomDrop(count=1, size=15, fill=(255,255,255))
+drop_fn = RandomDrop(random_count=5, size=15, fill=(255,255,255))
 
 class Mixing_Augment:
     def __init__(self, mixup_beta, use_identity, device):
@@ -266,6 +268,7 @@ class ImageCleanModel(BaseModel):
             test()
 
             visuals = self.get_current_visuals()
+            lq_img = tensor2img(self.lq, rgb2bgr=rgb2bgr)
             sr_img = tensor2img([visuals['result']], rgb2bgr=rgb2bgr)
             if 'gt' in visuals:
                 gt_img = tensor2img([visuals['gt']], rgb2bgr=rgb2bgr)
@@ -287,6 +290,9 @@ class ImageCleanModel(BaseModel):
                     save_gt_img_path = osp.join(self.opt['path']['visualization'],
                                              img_name,
                                              f'{img_name}_{current_iter}_gt.png')
+                    save_lq_img_path = osp.join(self.opt['path']['visualization'],
+                                             img_name,
+                                             f'{img_name}_{current_iter}_lq.png')
                 else:
                     
                     save_img_path = osp.join(
@@ -295,8 +301,12 @@ class ImageCleanModel(BaseModel):
                     save_gt_img_path = osp.join(
                         self.opt['path']['visualization'], dataset_name,
                         f'{img_name}_gt.png')
+                    save_lq_img_path = osp.join(
+                        self.opt['path']['visualization'], dataset_name,
+                        f'{img_name}_lq.png')
                     
                 imwrite(sr_img, save_img_path)
+                imwrite(lq_img,save_lq_img_path)
                 imwrite(gt_img, save_gt_img_path)
 
             if with_metrics:

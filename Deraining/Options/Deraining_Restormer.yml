@@ -1,8 +1,8 @@
 # general settings
-name: Deraining_Restormer
+name: Deraining_Restormer_RandomCropNum
 model_type: ImageCleanModel
 scale: 1
-num_gpu: 4  # set num_gpu: 0 for cpu mode
+num_gpu: []  # set num_gpu: 0 for cpu mode
 manual_seed: 100
 
 # dataset and data loader settings
@@ -65,7 +65,7 @@ network_g:
 
 # path
 path:
-  pretrain_network_g: ./Deraining/pretrained_models/deraining.pth
+  pretrain_network_g: ./Deraining/pretrained_models/randomCrop1.pth
   strict_load_g: true
   resume_state: ~
 

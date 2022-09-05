@@ -17,14 +17,14 @@ from basicsr.utils import (MessageLogger, check_resume, get_env_info,
                            set_random_seed)
 from basicsr.utils.dist_util import get_dist_info, init_dist
 from basicsr.utils.options import dict2str, parse
-import torchvision
 
 import numpy as np
 
 class RandomDrop(object):
-    def __init__(self, size=30, count=1, fill=(255,255,255),ratio=(0.2,0.8)):
+    def __init__(self, size=30, count=1, fill=(255,255,255),ratio=(0.2,0.8),random_count=None):
         self.size = size
         self.count = count
+        self.random_count = random_count
         self.fill = fill
         self.ratio = ratio
     def __call__(self, pic):
@@ -36,8 +36,9 @@ class RandomDrop(object):
         """
         height = pic.shape[2]
         width = pic.shape[3]
+        count = self.count if self.random_count == None else math.ceil(self.random_count * random.random())
         for i in range(pic.shape[0]):
-            for _ in range(self.count):
+            for _ in range(count):
                 randomY = math.floor(height * self.ratio[0]) +  np.random.randint(0, int(height * (self.ratio[1] - self.ratio[0]))) 
                 randomX = math.floor(width * self.ratio[0]) +  np.random.randint(0, int(width * (self.ratio[1] - self.ratio[0]))) 
                 for channel in range(3):
@@ -45,7 +46,7 @@ class RandomDrop(object):
 
         return pic
 
-drop_fn = RandomDrop(count=1, size=15, fill=(255,255,255))
+drop_fn = RandomDrop(random_count=5, size=15, fill=(255,255,255))
 
 def parse_options(is_train=True):
     parser = argparse.ArgumentParser()
