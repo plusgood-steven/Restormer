@@ -1,0 +1,5 @@
+{
+    "python.analysis.extraPaths": [
+        "./DCNv2_latest"
+    ]
+}

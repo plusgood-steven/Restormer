@@ -189,6 +189,56 @@ class Upsample(nn.Module):
         return self.body(x)
 
 ##########################################################################
+from detectron2.layers import Conv2d, get_norm
+from dcn_v2 import DCN as dcnv2
+import fvcore.nn.weight_init as weight_init
+
+
+class FeatureSelectionModule(nn.Module):
+    def __init__(self, in_chan, out_chan, norm="GN"):
+        super(FeatureSelectionModule, self).__init__()
+        self.conv_atten = Conv2d(in_chan, in_chan, kernel_size=1, bias=False, norm=get_norm(norm, in_chan))
+        self.sigmoid = nn.Sigmoid()
+        self.conv = Conv2d(in_chan, out_chan, kernel_size=1, bias=False, norm=get_norm('', out_chan))
+        weight_init.c2_xavier_fill(self.conv_atten)
+        weight_init.c2_xavier_fill(self.conv)
+
+    def forward(self, x):
+        atten = self.sigmoid(self.conv_atten(F.avg_pool2d(x, x.size()[2:])))
+        feat = torch.mul(x, atten)
+        x = x + feat
+        feat = self.conv(x)
+        return feat
+
+
+class FeatureAlign_V2(nn.Module):  # FaPN full version
+    def __init__(self, in_nc=128, out_nc=128, norm=None):
+        super(FeatureAlign_V2, self).__init__()
+        self.lateral_conv = FeatureSelectionModule(in_nc, in_nc, norm="")
+        self.offset = Conv2d(out_nc * 2, out_nc, kernel_size=1, stride=1, padding=0, bias=False, norm=norm)
+        self.dcpack_L2 = dcnv2(out_nc, out_nc, 3, stride=1, padding=1, dilation=1, deformable_groups=8,extra_offset_mask=True)
+        self.relu = nn.ReLU(inplace=True)
+        weight_init.c2_xavier_fill(self.offset)
+
+    def forward(self, feat_l, feat_s, main_path=None):
+        HW = feat_l.size()[2:]
+        if feat_l.size()[2:] != feat_s.size()[2:]:
+            feat_up = F.interpolate(feat_s, HW, mode='bilinear', align_corners=False)
+        else:
+            feat_up = feat_s
+        feat_arm = self.lateral_conv(feat_l)  # 0~1 * feats
+        #print("!!!!!!!!!!!!!!!!!",feat_l.shape, feat_s.shape)
+        #print("!!!!!!!!!!!!!!!!!",torch.cat([feat_arm, feat_up , feat_up], dim=1).shape)
+        #print("?????????????????",torch.cat([feat_arm, feat_up*2], dim=1).shape)
+        offset = self.offset(torch.cat([feat_arm, feat_up*2], dim=1))  # concat for offset by compute the dif
+        #print("@@@@@@@@@@@@@@@@", feat_up.shape, offset.shape)
+        feat_align = self.relu(self.dcpack_L2([feat_up, offset]))  # [feat, offset]
+        return feat_align + feat_arm
+
+
+
+
+########################################################################
 ##---------- Restormer -----------------------
 class Restormer(nn.Module):
     def __init__(self, 
@@ -220,27 +270,29 @@ class Restormer(nn.Module):
         self.latent = nn.Sequential(*[TransformerBlock(dim=int(dim*2**3), num_heads=heads[3], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[3])])
         
         self.up4_3 = Upsample(int(dim*2**3)) ## From Level 4 to Level 3
-        self.reduce_chan_level3 = nn.Conv2d(int(dim*2**3), int(dim*2**2), kernel_size=1, bias=bias)
+        self.fapn4 = FeatureAlign_V2(int(dim*2**2),int(dim*2**2))
+        self.reduce_chan_level3 = nn.Conv2d(int(dim*2**2), int(dim*2**2), kernel_size=1, bias=bias)
         self.decoder_level3 = nn.Sequential(*[TransformerBlock(dim=int(dim*2**2), num_heads=heads[2], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[2])])
 
 
         self.up3_2 = Upsample(int(dim*2**2)) ## From Level 3 to Level 2
-        self.reduce_chan_level2 = nn.Conv2d(int(dim*2**2), int(dim*2**1), kernel_size=1, bias=bias)
+        self.fapn3 = FeatureAlign_V2(int(dim*2**1),int(dim*2**1))
+        self.reduce_chan_level2 = nn.Conv2d(int(dim*2**1), int(dim*2**1), kernel_size=1, bias=bias)
         self.decoder_level2 = nn.Sequential(*[TransformerBlock(dim=int(dim*2**1), num_heads=heads[1], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[1])])
         
         self.up2_1 = Upsample(int(dim*2**1))  ## From Level 2 to Level 1  (NO 1x1 conv to reduce channels)
-
-        self.decoder_level1 = nn.Sequential(*[TransformerBlock(dim=int(dim*2**1), num_heads=heads[0], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[0])])
+        self.fapn2 = FeatureAlign_V2(int(dim),int(dim))
+        self.decoder_level1 = nn.Sequential(*[TransformerBlock(dim=int(dim), num_heads=heads[0], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[0])])
         
-        self.refinement = nn.Sequential(*[TransformerBlock(dim=int(dim*2**1), num_heads=heads[0], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_refinement_blocks)])
+        self.refinement = nn.Sequential(*[TransformerBlock(dim=int(dim), num_heads=heads[0], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_refinement_blocks)])
         
         #### For Dual-Pixel Defocus Deblurring Task ####
         self.dual_pixel_task = dual_pixel_task
         if self.dual_pixel_task:
-            self.skip_conv = nn.Conv2d(dim, int(dim*2**1), kernel_size=1, bias=bias)
+            self.skip_conv = nn.Conv2d(dim, int(dim), kernel_size=1, bias=bias)
         ###########################
             
-        self.output = nn.Conv2d(int(dim*2**1), out_channels, kernel_size=3, stride=1, padding=1, bias=bias)
+        self.output = nn.Conv2d(int(dim), out_channels, kernel_size=3, stride=1, padding=1, bias=bias)
 
     def forward(self, inp_img):
 
@@ -257,17 +309,20 @@ class Restormer(nn.Module):
         latent = self.latent(inp_enc_level4) 
                         
         inp_dec_level3 = self.up4_3(latent)
-        inp_dec_level3 = torch.cat([inp_dec_level3, out_enc_level3], 1)
+        inp_dec_level3 = self.fapn4(out_enc_level3, inp_dec_level3)
+        # inp_dec_level3 = torch.cat([inp_dec_level3, out_enc_level3], 1)
         inp_dec_level3 = self.reduce_chan_level3(inp_dec_level3)
         out_dec_level3 = self.decoder_level3(inp_dec_level3) 
 
         inp_dec_level2 = self.up3_2(out_dec_level3)
-        inp_dec_level2 = torch.cat([inp_dec_level2, out_enc_level2], 1)
+        inp_dec_level3 = self.fapn3(out_enc_level2, inp_dec_level2)
+        #inp_dec_level2 = torch.cat([inp_dec_level2, out_enc_level2], 1)
         inp_dec_level2 = self.reduce_chan_level2(inp_dec_level2)
         out_dec_level2 = self.decoder_level2(inp_dec_level2) 
 
         inp_dec_level1 = self.up2_1(out_dec_level2)
-        inp_dec_level1 = torch.cat([inp_dec_level1, out_enc_level1], 1)
+        inp_dec_level3 = self.fapn2(out_enc_level1, inp_dec_level1)
+        #inp_dec_level1 = torch.cat([inp_dec_level1, out_enc_level1], 1)
         out_dec_level1 = self.decoder_level1(inp_dec_level1)
         
         out_dec_level1 = self.refinement(out_dec_level1)
