@@ -2,9 +2,12 @@ LICENSE.md
 README.md
 setup.cfg
 setup.py
-DCNv2/__init__.py
-DCNv2/dcn_v2.py
-DCNv2/setup.py
+DCNv2_latest/__init__.py
+DCNv2_latest/dcn_v2.py
+DCNv2_latest/dcn_v2_onnx.py
+DCNv2_latest/setup.py
+DCNv2_latest/testcpu.py
+DCNv2_latest/testcuda.py
 basicsr.egg-info/PKG-INFO
 basicsr.egg-info/SOURCES.txt
 basicsr.egg-info/dependency_links.txt

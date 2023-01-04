@@ -227,11 +227,7 @@ class FeatureAlign_V2(nn.Module):  # FaPN full version
         else:
             feat_up = feat_s
         feat_arm = self.lateral_conv(feat_l)  # 0~1 * feats
-        #print("!!!!!!!!!!!!!!!!!",feat_l.shape, feat_s.shape)
-        #print("!!!!!!!!!!!!!!!!!",torch.cat([feat_arm, feat_up , feat_up], dim=1).shape)
-        #print("?????????????????",torch.cat([feat_arm, feat_up*2], dim=1).shape)
         offset = self.offset(torch.cat([feat_arm, feat_up*2], dim=1))  # concat for offset by compute the dif
-        #print("@@@@@@@@@@@@@@@@", feat_up.shape, offset.shape)
         feat_align = self.relu(self.dcpack_L2([feat_up, offset]))  # [feat, offset]
         return feat_align + feat_arm
 

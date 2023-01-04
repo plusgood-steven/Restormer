@@ -46,7 +46,6 @@ x = yaml.load(open(yaml_file, mode='r'), Loader=Loader)
 
 s = x['network_g'].pop('type')
 ##########################
-
 model_restoration = Restormer(**x['network_g'])
 
 checkpoint = torch.load(args.weights)
